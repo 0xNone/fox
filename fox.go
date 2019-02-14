@@ -1,382 +1,282 @@
 package fox
 
 import (
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jinzhu/gorm"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
+
+type (
+	DataHandlerFunc func(key string, value []string, refValModel reflect.Value, refTypModel reflect.Type) (string, interface{}, error)
+)
+
+//type DataHandlerFunction func(key string, value []string, refValModel reflect.Value, refTypModel reflect.Type) (string, interface{}, error)
 
 var (
-	ExtraExpression    []string          = []string{"LIMIT", "OFFSET", "ORDER_BY"}
-	BehaviorExpression []string          = []string{"LOAD_FK"}
-	ComparisonOperator map[string]string = map[string]string{"EQ": "=", "NE": "!=", "LT": "<", "LE": "<=", "GE": ">=", "GT": ">", "IN": "IN", "LIKE": "LIKE"}
-	LogicalOperator    map[string]string = map[string]string{"OR": "OR", "AND": "AND", "NOT": "NOT"}
+	DB *gorm.DB
+
+	ExtraQuery         []string          = []string{"EXT_LIMIT", "EXT_OFFSET", "EXT_ORDER_BY", "EXT_UNSCOPED"}
+	SwitchQuery        []string          = []string{"LAST", "FRIST"}
+	FalseValue         []string          = []string{"false", "f", "0", "no", "n", "null", "none"}
+	ComparisonOperator map[string]string = map[string]string{"EQ": "=", "NE": "!=", "LT": "<", "LE": "<=", "GE": ">=", "GT": ">", "IN": "IN", "NOT_IN": "NOT IN", "LIKE": "LIKE"}
+	LogicalOperator    map[string]string = map[string]string{"OR": "OR", "AND": "AND"}
+
+	ErrorDBNotConnet     = errors.New("database not connet")
+	ErrorNotStruct       = errors.New("not a struct")
+	ErrorNotPtr          = errors.New("not a pointer")
+	ErrorCannotSet       = errors.New("cannot set")
+	ErrorType            = errors.New("error type")
+	ErrorUnsupportedType = errors.New("unsupported type")
 )
 
-func IsExtraExpression(key string) bool {
-	for i := range ExtraExpression {
-		if key == ExtraExpression[i] {
+func IsExtraQuery(key string) bool {
+	for i := range ExtraQuery {
+		if strings.ToUpper(key) == ExtraQuery[i] {
 			return true
 		}
 	}
 	return false
 }
 
-func IsComparisonOperator(key string) bool {
-	for i := range ComparisonOperator {
-		if key == ComparisonOperator[i] {
+func IsFalseValue(key string) bool {
+	for i := range FalseValue {
+		if strings.ToUpper(key) == FalseValue[i] {
 			return true
 		}
 	}
 	return false
 }
 
-func IsLogicalOperator(key string) bool {
-	for i := range LogicalOperator {
-		if key == LogicalOperator[i] {
-			return true
+func ParseOperator(lOperator []string) (sLogical, sComparison string) {
+	for i := range lOperator {
+		if sLogical != "" && sComparison != "" {
+			break
 		}
-	}
-	return false
-}
-
-func SoftOperator() {
-
-}
-
-// 主要用于 SQL 语句的生成
-type GORMDrive struct {
-	model interface{}
-
-	SqlStatement *SQLStatement
-}
-
-// 新建数据接口
-func (self *GORMDrive) Insert(formData map[string]string) (reflect.Value, error) {
-	sv := reflect.ValueOf(self.model)
-	ref := reflect.New(sv.Elem().Type())
-	ref.Elem().Set(sv.Elem())
-	if err := Set(ref.Interface(), formData); err != nil {
-		return ref, err
-	}
-	return ref, nil
-}
-
-// 查询数据接口
-func (self *GORMDrive) Select(query map[string]string) () {
-}
-
-// 更新数据接口
-func (self *GORMDrive) Update(query map[string]string) () {
-}
-
-// 删除数据接口
-func (self *GORMDrive) Delete(query map[string]string) () {
-}
-
-type SQLStatement struct {
-	ExtraExpression map[string]string
-	WhereExpression map[string]string
-}
-
-func NewSQLStatement(model interface{}, query map[string]string) *SQLStatement {
-	newSql := &SQLStatement{ExtraExpression: make(map[string]string), WhereExpression: make(map[string]string)}
-	isFirstCondition := true
-	for k, v := range query {
-		if IsExtraExpression(k) {
-			newSql.ExtraExpression[k] = v
+		sOperator := strings.ToUpper(lOperator[i][1:])
+		if v, ok := LogicalOperator[sOperator]; sLogical == "" && ok {
+			sLogical = v
+		} else if v, ok := ComparisonOperator[sOperator]; sComparison == "" && ok {
+			sComparison = v
 		} else {
-			reg := regexp.MustCompile(`(\w+)(\.\w+)?(\.\w+)?`)
-			s := reg.FindStringSubmatch(k)
-			mv := reflect.TypeOf(model).Elem()
-			if _, isExist := mv.FieldByName(s[1]); !isExist {
-				continue
-			}
-			condition := ""
-			if !isFirstCondition {
-				condition = "AND "
-			}
-			switch len(s) {
-			case 2:
-				condition = fmt.Sprintf("%s%s = ?", condition, s[1])
-				newSql.WhereExpression[condition] = v
-			case 3:
-				switch {
-				case IsComparisonOperator(s[2]):
-					condition = fmt.Sprintf("%s%s %s ?", condition, s[1], s[2])
-				case IsLogicalOperator(s[2]):
-					condition = fmt.Sprintf("%s %s = ?", s[2], s[1])
-				}
-
-			}
-			newSql.WhereExpression[s[1]] = v
-			isFirstCondition = false
+			continue
 		}
 	}
-	return newSql
+	if sLogical == "" {
+		sLogical = "AND"
+	}
+	if sComparison == "" {
+		sComparison = "="
+	}
+	return sLogical, sComparison
 }
 
-// 主要用于 WHERE 表达式的生成
-type WhereExpression struct {
+// ORM 驱动
+type GORMDrive struct {
+	Model      interface{}
+	ModelSlice interface{}
 }
 
-func NewWhereExpression(query map[string]string) (*WhereExpression, error) {
-	sqlStatement := &WhereExpression{}
-	return sqlStatement, nil
-}
-
-func (self *WhereExpression) Parse(query map[string]string) {
-	//reg := regexp.MustCompile(`^(\w+).(\w+)$`)
-	//first := true
-	//for k, v := range query {
-	//	result := reg.FindStringSubmatch(k)
-	//	if first {
-	//
-	//	}
-	//}
-}
-
-//func (self *WhereExpression) IsComparisonOperator(oper string) bool {
-//	_, ok := self.ComparisonOperator[oper]
-//	return ok
-//}
-//
-//func (self *WhereExpression) IsLogicalOperator(oper string) bool {
-//	_, ok := self.LogicalOperator[oper]
-//	return ok
-//}
-
-//func (self *WhereExpression) NewCondition(logical, key, comparison, value string) (*Condition, error) {
-//	newCond := &Condition{}
-//	defaults.Set(newCond)
-//	if logical == "" {
-//		logical = "AND"
-//	} else if v, ok := newCond.LogicalOperator[strings.ToUpper(logical)]; ok {
-//		logical = v
-//	} else {
-//		return nil, errors.New("this")
-//	}
-//	if comparison == "" {
-//		logical = "="
-//	}
-//	return
-//}
-
-type Condition struct {
-	Logical            string
-	Key                string
-	Comparison         string
-	Value              string
-	ComparisonOperator map[string]string `default:"{\"EQ\":\"=\",\"NE\":\"!=\",\"LT\":\"<\",\"LE\":\"<=\",\"GE\":\">=\",\"GT\":\">\",\"IN\":\"IN\",\"NOT\":\"NOT\",\"IS\":\"IS\",\"LIKE\":\"LIKE\"}"`
-	LogicalOperator    map[string]string `default:"{\"OR\":\"OR\",\"AND\":\"AND\",\"NOT\":\"NOT\"}"`
-}
-
-//func NewCondition(logical, key, comparison, value string) (*Condition, error) {
-//	newCond := &Condition{}
-//	defaults.Set(newCond)
-//	if logical == "" {
-//		logical = "AND"
-//	} else if v, ok := newCond.LogicalOperator[strings.ToUpper(logical)]; ok {
-//		logical = v
-//	} else {
-//		return nil, errors.New("this")
-//	}
-//	if comparison == "" {
-//		logical = "="
-//	}
-//	return
-//}
-
-func (self *Condition) GenLogicalExpression() (string, string) {
-	return fmt.Sprintf("%s %s %s ?", self.Logical, self.Key, self.Comparison), self.Value
-}
-
-var (
-	ErrorNotStructPtr = errors.New("not a struct pointer")
-)
-
-type ModelAPI struct {
-	model interface{}
-}
-
-func Set(model interface{}, formdata map[string]string) error {
+func NewGORMDrive(model interface{}, modelSlice interface{}) (*GORMDrive, error) {
 	if reflect.TypeOf(model).Kind() != reflect.Ptr {
-		return ErrorNotStructPtr
+		return nil, ErrorNotPtr
 	}
 
 	v := reflect.ValueOf(model).Elem()
 	t := v.Type()
 
 	if t.Kind() != reflect.Struct {
-		return ErrorNotStructPtr
+		return nil, ErrorNotStruct
 	}
 
-	for i := 0; i < t.NumField(); i++ {
-		fmt.Println(1, strings.ToLower(t.Field(i).Name))
-		fmt.Println(2, formdata[strings.ToLower(t.Field(i).Name)])
-		if strings.ToLower(t.Field(i).Name) == "username" {
-			fmt.Println(1111)
-			v.Field(i).Set(reflect.ValueOf("thisisadmin").Convert(v.Field(i).Type()))
+	if reflect.ValueOf(DB).IsNil() {
+		return nil, ErrorDBNotConnet
+	}
+
+	newDrive := &GORMDrive{model, modelSlice}
+	DB.AutoMigrate(newDrive.Model)
+	return newDrive, nil
+}
+
+func (self *GORMDrive) GenModel() (model reflect.Value) {
+	sv := reflect.ValueOf(self.Model)
+	model = reflect.New(sv.Elem().Type())
+	model.Elem().Set(sv.Elem())
+	return model
+}
+
+func (self *GORMDrive) GenModels() (models reflect.Value) {
+	models = reflect.New(reflect.TypeOf(self.ModelSlice))
+	return models
+}
+
+// 新建数据接口
+func (self *GORMDrive) Insert(data url.Values) (interface{}, error) {
+	refValModel := self.GenModel()
+
+	result, err := self.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
+	if err != nil {
+		return nil, err
+	}
+
+	model := refValModel.Interface()
+
+	//refTypModel := reflect.TypeOf(model)
+	modelElm := refValModel.Elem()
+	modelType := modelElm.Type()
+	for i := 0; i < modelType.NumField(); i++ {
+		// todo: 没有考虑到内嵌结构体部分，这里写的捞一些
+		if modelElm.Field(i).Kind() == reflect.Struct {
+			embedStruField := modelElm.Field(i)
+			//fmt.Println(1100, embedStruField)
+			embedStruType := embedStruField.Type()
+			for j := 0; j < embedStruField.NumField(); j++ {
+				key := strings.ToLower(embedStruType.Field(j).Name)
+				if inputVal, ok := result[key]; ok {
+					embedStruField.Field(i).Set(reflect.ValueOf(inputVal).Convert(embedStruField.Field(i).Type()))
+				}
+			}
 		}
-		if inputVal, ok := formdata[strings.ToLower(t.Field(i).Name)]; ok {
-			if err := setField(v.Field(i), inputVal); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-type Setter interface {
-	SetDefaults()
-}
-
-func callSetter(v interface{}) {
-	if ds, ok := v.(Setter); ok {
-		ds.SetDefaults()
-	}
-}
-
-func setField(field reflect.Value, inputVal string) error {
-	if !field.CanSet() {
-		return nil
-	}
-	if field.Kind() != reflect.Struct || inputVal == "" {
-		return nil
-	}
-
-	if reflect.DeepEqual(reflect.Zero(field.Type()).Interface(), field.Interface()) {
-		switch field.Kind() {
-		case reflect.Bool:
-			if val, err := strconv.ParseBool(inputVal); err == nil {
-				field.Set(reflect.ValueOf(val).Convert(field.Type()))
-			}
-		case reflect.Int:
-			if val, err := strconv.ParseInt(inputVal, 10, 64); err == nil {
-				field.Set(reflect.ValueOf(int(val)).Convert(field.Type()))
-			}
-		case reflect.Int8:
-			if val, err := strconv.ParseInt(inputVal, 10, 8); err == nil {
-				field.Set(reflect.ValueOf(int8(val)).Convert(field.Type()))
-			}
-		case reflect.Int16:
-			if val, err := strconv.ParseInt(inputVal, 10, 16); err == nil {
-				field.Set(reflect.ValueOf(int16(val)).Convert(field.Type()))
-			}
-		case reflect.Int32:
-			if val, err := strconv.ParseInt(inputVal, 10, 32); err == nil {
-				field.Set(reflect.ValueOf(int32(val)).Convert(field.Type()))
-			}
-		case reflect.Int64:
-			if val, err := time.ParseDuration(inputVal); err == nil {
-				field.Set(reflect.ValueOf(val).Convert(field.Type()))
-			} else if val, err := strconv.ParseInt(inputVal, 10, 64); err == nil {
-				field.Set(reflect.ValueOf(val).Convert(field.Type()))
-			}
-		case reflect.Uint:
-			if val, err := strconv.ParseUint(inputVal, 10, 64); err == nil {
-				field.Set(reflect.ValueOf(uint(val)).Convert(field.Type()))
-			}
-		case reflect.Uint8:
-			if val, err := strconv.ParseUint(inputVal, 10, 8); err == nil {
-				field.Set(reflect.ValueOf(uint8(val)).Convert(field.Type()))
-			}
-		case reflect.Uint16:
-			if val, err := strconv.ParseUint(inputVal, 10, 16); err == nil {
-				field.Set(reflect.ValueOf(uint16(val)).Convert(field.Type()))
-			}
-		case reflect.Uint32:
-			if val, err := strconv.ParseUint(inputVal, 10, 32); err == nil {
-				field.Set(reflect.ValueOf(uint32(val)).Convert(field.Type()))
-			}
-		case reflect.Uint64:
-			if val, err := strconv.ParseUint(inputVal, 10, 64); err == nil {
-				field.Set(reflect.ValueOf(val).Convert(field.Type()))
-			}
-		case reflect.Uintptr:
-			if val, err := strconv.ParseUint(inputVal, 10, 64); err == nil {
-				field.Set(reflect.ValueOf(uintptr(val)).Convert(field.Type()))
-			}
-		case reflect.Float32:
-			if val, err := strconv.ParseFloat(inputVal, 32); err == nil {
-				field.Set(reflect.ValueOf(float32(val)).Convert(field.Type()))
-			}
-		case reflect.Float64:
-			if val, err := strconv.ParseFloat(inputVal, 64); err == nil {
-				field.Set(reflect.ValueOf(val).Convert(field.Type()))
-			}
-		case reflect.String:
-			field.Set(reflect.ValueOf(inputVal).Convert(field.Type()))
-
-		case reflect.Slice:
-			ref := reflect.New(field.Type())
-			ref.Elem().Set(reflect.MakeSlice(field.Type(), 0, 0))
-			switch field.Type().Elem().Kind() {
-			case reflect.Uint8:
-				if h, err := hex.DecodeString(inputVal); err == nil {
-					field.Set(reflect.ValueOf(h).Convert(field.Type()))
-				} else {
-					return err
-				}
-
-			default:
-				if inputVal != "" && inputVal != "[]" {
-					if err := json.Unmarshal([]byte(inputVal), ref.Interface()); err != nil {
-						return err
-					}
-				}
-				field.Set(ref.Elem().Convert(field.Type()))
-			}
-		case reflect.Map:
-			ref := reflect.New(field.Type())
-			ref.Elem().Set(reflect.MakeMap(field.Type()))
-			if inputVal != "" && inputVal != "{}" {
-				if err := json.Unmarshal([]byte(inputVal), ref.Interface()); err != nil {
-					return err
-				}
-			}
-			field.Set(ref.Elem().Convert(field.Type()))
-		case reflect.Struct:
-			ref := reflect.New(field.Type())
-			if inputVal != "" && inputVal != "{}" {
-				if err := json.Unmarshal([]byte(inputVal), ref.Interface()); err != nil {
-					return err
-				}
-			}
-			field.Set(ref.Elem())
-		case reflect.Ptr:
-			field.Set(reflect.New(field.Type().Elem()))
+		key := strings.ToLower(modelType.Field(i).Name)
+		if inputVal, ok := result[key]; ok {
+			modelElm.Field(i).Set(reflect.ValueOf(inputVal).Convert(modelElm.Field(i).Type()))
 		}
 	}
 
-	if field.Kind() == reflect.Ptr {
-		setField(field.Elem(), inputVal)
-		callSetter(field.Interface())
+	resDB := DB.Create(model)
+	if resDB.Error != nil {
+		return nil, resDB.Error
 	}
-
-	return nil
+	return model, nil
 }
 
-func BindAPI(model interface{}) (reflect.Value, error) {
-	formData := map[string]string{"username": "admin", "password": "1213ba"}
+// 查询数据接口
+func (self *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error) {
+	refValueModels := self.GenModels()
 
-	sv := reflect.ValueOf(model)
-	ref := reflect.New(sv.Elem().Type())
-	ref.Elem().Set(sv.Elem())
-	//if err := Set(ref.Interface(), formData); err != nil {
-	//	return err
-	//}
-	//callSetter(ref.Interface())
-	if err := Set(ref.Interface(), formData); err != nil {
-		return ref, err
+	lModelsPtr := refValueModels.Interface()
+	resDB, err := self.QueryParse(DB, query)
+	if err != nil {
+		return nil, resDB, err
 	}
-	fmt.Println(10001, ref)
-	return ref, nil
+	var count uint
+	resDB.Count(&count)
+
+	result, err := self.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
+	limit := 20
+	offset := 0
+	order := ""
+	if v, ok := result["EXT_LIMIT"]; ok {
+		tmpValue, err := strconv.Atoi(v.([]string)[0])
+		if err == nil {
+			limit = tmpValue
+		}
+	}
+	if v, ok := result["EXT_OFFSET"]; ok {
+		tmpValue, err := strconv.Atoi(v.([]string)[0])
+		if err == nil {
+			offset = tmpValue
+		}
+	}
+	if v, ok := result["EXT_ORDER_BY"]; ok {
+		if err == nil {
+			order = v.([]string)[0]
+		}
+	}
+
+	resDB.Offset(offset).Limit(limit).Order(order).Find(lModelsPtr)
+	return lModelsPtr, resDB, resDB.Error
+}
+
+// 更新数据接口
+func (self *GORMDrive) Update(query, data url.Values) (int64, error) {
+	result, err := self.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
+	if err != nil {
+		return 0, err
+	}
+
+	resDB, err := self.QueryParse(DB.Model(self.Model), query)
+	if err != nil {
+		return 0, err
+	}
+	resDB = resDB.Updates(result)
+	return resDB.RowsAffected, resDB.Error
+}
+
+// 删除数据接口
+func (self *GORMDrive) Delete(query url.Values) (int64, error) {
+	resDB, err := self.QueryParse(DB, query)
+	if err != nil {
+		return 0, err
+	}
+	result, err := self.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
+	if v, ok := result["EXT_UNSCOPED"]; ok {
+		if !IsFalseValue(v.([]string)[0]) {
+			resDB = resDB.Unscoped()
+		}
+	}
+	resDB = resDB.Delete(self.Model)
+	return resDB.RowsAffected, resDB.Error
+}
+
+func (self *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values) (resDB *gorm.DB, err error) {
+	sWhereStatement := ""
+	lWhereArgs := make([]interface{}, 0)
+
+	isFirstCondition := true
+	mv := reflect.TypeOf(self.Model).Elem()
+
+	for k, v := range query {
+		regFieldName := regexp.MustCompile(`^\w+`)
+		sFieldName := strings.ToLower(regFieldName.FindString(k))
+
+		if _, isExist := mv.FieldByNameFunc(func(s string) bool {
+			return strings.ToLower(s) == sFieldName
+		}); !isExist {
+			continue
+		}
+
+		regOperator := regexp.MustCompile(`\.(\w+)`)
+		sLogicalOperator, sComparisonOperator := ParseOperator(regOperator.FindAllString(k, -1))
+		if isFirstCondition {
+			sLogicalOperator = ""
+		} else {
+			sLogicalOperator += " "
+		}
+
+		if sComparisonOperator == "" {
+			sComparisonOperator = ComparisonOperator["EQ"]
+		}
+
+		sWhereStatement += fmt.Sprintf("%s%s%s? ", sLogicalOperator, sFieldName, sComparisonOperator)
+		lWhereArgs = append(lWhereArgs, v)
+		isFirstCondition = false
+	}
+
+	resDB = DB.Model(self.Model).Where(sWhereStatement, lWhereArgs...)
+	return resDB, resDB.Error
+}
+
+func (self *GORMDrive) DataHanlder(data url.Values, handlers ...DataHandlerFunc) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	mt := reflect.TypeOf(self.Model).Elem()
+	mv := reflect.ValueOf(self.Model).Elem()
+	for k, v := range data {
+		for _, handler := range handlers {
+			newKey, newValue, err := handler(k, v, mv, mt)
+			if err != nil {
+				return map[string]interface{}{}, err
+			}
+			if newKey == "" && newValue == "" {
+				continue
+			}
+			result[newKey] = newValue
+		}
+	}
+	return result, nil
 }
