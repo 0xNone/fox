@@ -1,24 +1,24 @@
 language: go
 go:
-- '1.9'
-- 1.10.x
+  - '1.9'
+  - 1.10.x
 before_install:
-- go get github.com/jinzhu/gorm
-- go get github.com/labstack/echo
-- go get github.com/pelletier/go-toml
-- go get github.com/jinzhu/gorm/dialects/sqlite
+  - go get github.com/jinzhu/gorm
+  - go get github.com/labstack/echo
+  - go get github.com/pelletier/go-toml
+  - go get github.com/jinzhu/gorm/dialects/sqlite
 install:
-- go get github.com/mattn/goveralls
+  - go get github.com/mattn/goveralls
 script:
-- go test -v -covermode=count -coverprofile=coverage.out
-- "$HOME/gopath/bin/goveralls -repotoken $COVERALLS_TOKEN -coverprofile=coverage.out
+  - go test -v -covermode=count -coverprofile=coverage.out
+  - "$HOME/gopath/bin/goveralls -repotoken $COVERALLS_TOKEN -coverprofile=coverage.out
   -service=travis-ci"
 notifications:
   email:
     recipients:
-    - 437664071@qq.com
+      - 437664071@qq.com
     on_success: change
     on_failure: always
 env:
   global:
-    secure: umjnEFuljeh6tYMCMOm4VzevOt7MxFZX6h6C3TO8vNWIQBvPAGMfVcHFGoyCM8sevPLaYDAAO0f8pbNajQN9w9naBz5DLrd+57u+5jTWWU8/zaFFZICqZwrMhX9IEtHiqBNl+sS1dzQUpqwz/EeZA9zMQAAJItvM6KK0zejgZ5tDv457jFSKQjkqrIcclGRyo53uV1y8AazKfBJGRQEp4TuC1z4FJLnVzOLSq9E8Cv3PS39pT2h0f6JUQA81UuKnteM/mQZvtC5TABKL+p7fMvB3p0jZCf6DFsk0yr/OW/u36/Ax4sYmu8c9YrkyFDMWSq9L1OuLddLvvfxyE9HpEivE2OXLQhC2QZpM38k5zJOldmxBW+x5+OIMRnDTywcKo27iqvrEj4vQmnFbkA+EnTEdaHPY2JWcc5DJWOHAvA1e72Fe+zdrLX6myXZGo1w/E3YpXzay2YK4ufLXHqwChaIst6prrE25gaZQHPPPe0pCAMFQY9lHQJVUDyFEBUv8d6p5OFOXm/WPg/2UglCsBN9K1WY/Fa0Bk2bhhh1+sZURzKSUtXC9WkvrY3jFI4hRqssWCFBxV/oaUcjx+LD8CuIuZB3PO92929snMkpF3gZpqSLkuAqP7zaHT5ovY4PtmkUBQXEhiTpCiuXk/+FaQXdcDmytE/vvrIjQgdR9ZLc=
+    - secure: B0BYoX5VX9oznt4JOEzmhxthDetARIqdksL+BAegcn7n8HUhlbqw3SFp2cMa6JBaJ2YCXdNHlCKGhRjV6rLsAtpjKJUn4SCfOgfo/p4dmyoB66O7RUhcCQ5aXNjUbyQ9n75CFFwTrkOchXGS+K9ZYizH8+fLr8ktGanklFlHuYOky+63ASxvrbk9DG2aQm3xP4x/ZC11pTNAkJHKNSgq/T3BdnWmBYFQJvtK5o2TQn80T00JzWpzVTJpwtS5aOBWra1dp592Fnsjnb1QBTCvuKiPNzAEjyFc2zuCS1BLoqdnrCboJZCqEkf5LgcqX3SwqdjE6dO9X4T3v09djJH0GatYIJuTT0WLZs6P7SgmCSvcNgW6Ktyqb9zGB3iFq9YvmGjHqIfAPNRJPU6+j8r6PxvGRn2WPPot1I5pa0nycDtagq/rrKPvoO5ZtSeXDHhzQNInHdcuGk4HaZkz4m2yYWptMYBlGabwx8/iqec6dofup04n7FjwyttOD4Qp/cA5mbWjKUypxfQE/IqTLZsws8XtGz5YmGzzyP64OHru47bvXY+E0+dN4Z1j0UzwVP0kwbQNhUTdLxBsi7jziXCrZOfEto0El3SQBg9mz37dG3HgWX8xXm91gYQeAb3xcNuwAZdPmLeWlK6wLDHJONQJ/s0hLDf/WkVJbymLrsMNlJs=
