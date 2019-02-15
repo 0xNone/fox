@@ -3,6 +3,11 @@ go:
   - '1.9'
   - 1.10.x
 
+before_install:
+  - go get github.com/jinzhu/gorm
+  - go get github.com/labstack/echo
+  - go get github.com/pelletier/go-toml
+  - go get github.com/jinzhu/gorm/dialects/sqlite
 install:
   - go get github.com/mattn/goveralls
 script:
