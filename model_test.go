@@ -3,8 +3,8 @@ package fox
 import (
 	"net/url"
 	"reflect"
-	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,23 +88,9 @@ func TestParseOperator(t *testing.T) {
 		wantSLogical    string
 		wantSComparison string
 	}{
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.or", -1)}, "OR", "="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.and", -1)}, "AND", "="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.eq", -1)}, "AND", "="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.ne", -1)}, "AND", "!="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.lt", -1)}, "AND", "<"},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.le", -1)}, "AND", "<="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.ge", -1)}, "AND", ">="},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.gt", -1)}, "AND", ">"},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.in", -1)}, "AND", "IN"},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.not_in", -1)}, "AND", "NOT IN"},
-		{"baseTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.like", -1)}, "AND", "LIKE"},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.or.ne", -1)}, "OR", "!="},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.or.eq", -1)}, "OR", "="},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.and.in", -1)}, "AND", "IN"},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.or.eq.and", -1)}, "OR", "="},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.or.and.in.like", -1)}, "OR", "IN"},
-		{"MultipleOperatorsTest", args{regexp.MustCompile(`\.(\w+)`).FindAllString("id.and.eq.and.like", -1)}, "AND", "="},
+		{"baseTest", args{strings.Split("id.or", ".")}, "OR", "="},
+		{"MultipleOperatorsTest", args{strings.Split("id.or.ne", ".")}, "OR", "!="},
+		{"MultipleOperatorsTest", args{strings.Split("id.or.ne.and.eq.or", ".")}, "OR", "!="},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,18 +113,23 @@ func TestNewGORMDrive(t *testing.T) {
 		modelSlice interface{}
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    *GORMDrive
-		wantErr bool
+		name     string
+		args     args
+		want     *GORMDrive
+		wantErr  bool
+		setDBnil bool
 	}{
-		{"BaseTest", args{&Person{}, []Person{}}, &GORMDrive{&Person{}, []Person{}}, false},
-		{"BaseTest", args{&Pet{}, []Pet{}}, &GORMDrive{&Pet{}, []Pet{}}, false},
-		{"ErrorTest", args{Person{}, []Person{}}, nil, true},
-		{"ErrorTest", args{&str, []Person{}}, nil, true},
+		{"BaseTest", args{&Person{}, []Person{}}, &GORMDrive{&Person{}, []Person{}}, false, false},
+		{"BaseTest", args{&Pet{}, []Pet{}}, &GORMDrive{&Pet{}, []Pet{}}, false, false},
+		{"ErrorTest", args{Person{}, []Person{}}, nil, true, false},
+		{"ErrorTest", args{&str, []Person{}}, nil, true, false},
+		{"ErrorTest", args{&Pet{}, []Pet{}}, nil, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.setDBnil {
+				DB = nil
+			}
 			got, err := NewGORMDrive(tt.args.model, tt.args.modelSlice)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewGORMDrive() error = %v, wantErr %v", err, tt.wantErr)
@@ -146,6 +137,9 @@ func TestNewGORMDrive(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewGORMDrive() = %v, want %v", got, tt.want)
+			}
+			if tt.setDBnil {
+				DB, _ = gorm.Open("sqlite3", "database.db")
 			}
 		})
 	}
@@ -306,7 +300,7 @@ func TestGORMDrive_Select(t *testing.T) {
 		wantLen int
 	}{
 		{"BaseTest", personField, args{url.Values{"id": []string{"1"}, "ext_limit": []string{"4"}}}, false, 1},
-		{"BaseTest", personField, args{url.Values{"id.lt": []string{"4"}, "id.and.ge": []string{"2"}, "ext_limit": []string{"4"}}}, false, 2},
+		{"BaseTest", personField, args{url.Values{"id.lt": []string{"3"}, "id.or.eq": []string{"6"}, "ext_limit": []string{"4"}}}, false, 3},
 		{"BaseTest", personField, args{url.Values{"id.lt": []string{"8"}, "ext_limit": []string{"4"}, "ext_offset": []string{"2"}}}, false, 4},
 		{"BaseTest", personField, args{url.Values{"id.lt": []string{"5"}, "ext_order_by": []string{"id"}}}, false, 4},
 	}
@@ -316,7 +310,9 @@ func TestGORMDrive_Select(t *testing.T) {
 				Model:      tt.fields.Model,
 				ModelSlice: tt.fields.ModelSlice,
 			}
-			gotQueryResult, _, err := self.Select(tt.args.query)
+
+			gotQueryResult, _, err := self.Select(tt.args.query, tt.args.query.Encode())
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GORMDrive.Select() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -325,9 +321,6 @@ func TestGORMDrive_Select(t *testing.T) {
 				t.Errorf("The result length of GORMDrive.Select() = %v, wantLen %v", resLen, tt.wantLen)
 				return
 			}
-			//if !reflect.DeepEqual(gotQueryResult, tt.wantQueryResult) {
-			//	t.Errorf("GORMDrive.Select() = %v, want %v", gotQueryResult, tt.wantQueryResult)
-			//}
 		})
 	}
 }
@@ -360,7 +353,7 @@ func TestGORMDrive_Update(t *testing.T) {
 				Model:      tt.fields.Model,
 				ModelSlice: tt.fields.ModelSlice,
 			}
-			got, err := self.Update(tt.args.query, tt.args.data)
+			got, err := self.Update(tt.args.query, tt.args.data, tt.args.query.Encode())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GORMDrive.Update() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -395,11 +388,10 @@ func TestGORMDrive_Delete(t *testing.T) {
 		want    int64
 		wantErr bool
 	}{
-		{"BaseTest", personField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPerson.ID-4), 10)}}}, 4, false},
-		{"BaseTest", personField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPerson.ID-4), 10)}}}, 0, false},
+		{"BaseTest", personField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPerson.ID-2), 10)}}}, 2, false},
+		{"BaseTest", personField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPerson.ID-3), 10)}}}, 1, false},
 		{"BaseTest", petField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPet.ID-2), 10)}}}, 2, false},
-		{"BaseTest", petField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPet.ID-2), 10)}, "EXT_UNSCOPED": []string{"true"}}}, 2, false},
-		{"BaseTest", petField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPet.ID-4), 10)}, "EXT_UNSCOPED": []string{"false"}}}, 2, false},
+		{"BaseTest", petField, args{url.Values{"id.gt": []string{strconv.FormatUint(uint64(lastPet.ID-3), 10)}, "EXT_UNSCOPED": []string{"true"}}}, 3, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -407,7 +399,7 @@ func TestGORMDrive_Delete(t *testing.T) {
 				Model:      tt.fields.Model,
 				ModelSlice: tt.fields.ModelSlice,
 			}
-			got, err := self.Delete(tt.args.query)
+			got, err := self.Delete(tt.args.query, tt.args.query.Encode())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GORMDrive.Delete() error = %v, wantErr %v", err, tt.wantErr)
 				return

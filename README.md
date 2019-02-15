@@ -1,5 +1,5 @@
 # FOX
-![CI](https://travis-ci.org/0xNone/fox.svg?branch=master)
+![CI](https://travis-ci.org/0xNone/fox.svg?branch=master) ![Coverage Status](https://coveralls.io/repos/github/0xNone/fox/badge.svg?branch=master)
 
 **TODO**
 

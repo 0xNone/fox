@@ -1,7 +1,6 @@
 package fox
 
 import (
-	"github.com/creasty/defaults"
 	"github.com/labstack/echo"
 	"net/http"
 	"reflect"
@@ -10,101 +9,23 @@ import (
 )
 
 var (
-	RetCode *ResponseCode
-
+	// Echo 路由对象，默认会进行初始化
 	RawRouter *echo.Echo
+	// 用于绑定 api 的组，默认路径为空
 	BindGroup *echo.Group
 
-	ResponseCNMessage = map[int]string{
-		0:    "成功",
-		-255: "失败",
-		-254: "超时",
-		-253: "未知错误",
-		-252: "请求过于频繁",
-		-251: "此接口已不推荐使用",
-		-249: "未找到",
-		-248: "已存在",
-		-239: "无权访问",
-		-238: "权限申请失败",
-		-229: "校验失败",
-		-228: "缺少参数",
-		-227: "缺少提交内容",
-		-219: "非法参数",
-		-218: "非法提交内容",
-		1:    "Websocket 请求完成",}
-
-	ResponseCNData = map[int]interface{}{
-		http.StatusOK:           "成功",
-		http.StatusCreated:      "创建/更新成功",
-		http.StatusAccepted:     "操作成功",
+	// 默认的响应状态码与消息
+	DefaultMessage = map[int]interface{}{
+		http.StatusOK:           "Success",
+		http.StatusCreated:      "Creation/update succeeded",
+		http.StatusAccepted:     "Successful operation",
 		http.StatusNoContent:    "",
-		http.StatusBadRequest:   "无效的请求",
-		http.StatusUnauthorized: "未授权访问",
-		http.StatusForbidden:    "拒绝访问",
-		http.StatusConflict:     "存在冲突",
+		http.StatusBadRequest:   "Invalid request",
+		http.StatusUnauthorized: "Unauthorized access",
+		http.StatusForbidden:    "Access denied",
+		http.StatusConflict:     "There are conflicts",
 	}
 )
-
-func init() {
-	var err error
-	RawRouter = echo.New()
-	RetCode, err = NewResponseCode(ResponseCNMessage)
-	if err != nil {
-		panic(err)
-	}
-}
-
-type ResponseCode struct {
-	Success          int `default:"0"`
-	Failed           int `default:"-255"`
-	Timeout          int `default:"-254"`
-	Unknown          int `default:"-253"`
-	TooFrequent      int `default:"-252"`
-	Deprecated       int `default:"-251"`
-	NotFound         int `default:"-249"`
-	AlreadyExists    int `default:"-248"`
-	PermissionDenied int `default:"-239"`
-	InvalidRole      int `default:"-238"`
-	CheckFailure     int `default:"-229"`
-	QueryRequired    int `default:"-228"`
-	PostdataRequired int `default:"-227"`
-	InvalidParams    int `default:"-219"`
-	InvalidPostdata  int `default:"-218"`
-	WsDone           int `default:"1"`
-
-	Message map[int]string
-}
-
-func (retCode *ResponseCode) ToMap(code int) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": retCode.Message[code]}
-}
-
-func (retCode *ResponseCode) ToMapUsingData(code int, data interface{}) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": retCode.Message[code], "data": data}
-}
-
-func (retCode *ResponseCode) ToMapUsingMessage(code int, message string) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": message}
-}
-
-func (retCode *ResponseCode) ToMapUsingDataMessage(code int, message string, data interface{}) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": message, "data": data}
-}
-
-func NewResponseCode(msg map[int]string) (*ResponseCode, error) {
-	// 通过 field 的 index 获取 tag
-	responseCode := &ResponseCode{}
-	err := defaults.Set(responseCode)
-	if err != nil {
-		return nil, err
-	}
-	responseCode.Message = ResponseCNMessage
-	return responseCode, nil
-}
-
-func Group(prefix string, m ...echo.MiddlewareFunc) (g *echo.Group) {
-	return RawRouter.Group(prefix, m...)
-}
 
 func InStrSlice(str string, strSlice []string) bool {
 	for i := range strSlice {
@@ -114,76 +35,149 @@ func InStrSlice(str string, strSlice []string) bool {
 	}
 	return false
 }
+func init() {
+	RawRouter = echo.New()
+}
 
-func ModelRoute(model interface{}, modelSlice interface{}, disableApi ...string) error {
-	if BindGroup == nil {
-		BindGroup = RawRouter.Group("")
+// 新建一个 ModelView
+// model 是一个结构体指针，modelSlice 为结构体切片
+// api 会直接对 model 在数据库中的数据进行操作
+func NewModelView(model interface{}, modelSlice interface{}) (*ModelView, error) {
+	gormDrive, err := NewGORMDrive(model, modelSlice)
+	if err != nil {
+		return nil, err
 	}
+
 	refValModel := reflect.ValueOf(model)
 	regStruName := regexp.MustCompile(`[\w_]+$`)
 	struName := regStruName.FindString(refValModel.Type().String())
 	struNameLow := strings.ToLower(struName)
+	m := &ModelView{Name: struNameLow, Message: DefaultMessage, gormDrive: gormDrive}
+	return m, nil
+}
 
-	gormDrive, err := NewGORMDrive(model, modelSlice)
+// ModelView 用于创建增删改查相关 api
+// Name 是 api 名即：/xxx，在应用 api 前可进行修改，默认为 model 名称（小写）
+type ModelView struct {
+	Name      string
+	Message   map[int]interface{}
+	gormDrive *GORMDrive
+}
+
+func (mv *ModelView) InitBindGroup() {
+	if BindGroup == nil {
+		BindGroup = RawRouter.Group("")
+	}
+}
+
+func (mv *ModelView) EnablePOST() {
+	mv.InitBindGroup()
+	BindGroup.POST("/"+mv.Name, mv.FuncPOST)
+}
+
+func (mv *ModelView) EnableDELETE() {
+	mv.InitBindGroup()
+	BindGroup.DELETE("/"+mv.Name, mv.FuncDELETE)
+}
+
+func (mv *ModelView) EnablePUT() {
+	mv.InitBindGroup()
+	BindGroup.PUT("/"+mv.Name, mv.FuncPUT)
+}
+
+func (mv *ModelView) EnableGET() {
+	mv.InitBindGroup()
+	BindGroup.GET("/"+mv.Name, mv.FuncGET)
+}
+
+func (mv *ModelView) FuncPOST(context echo.Context) error {
+	data, err := context.FormParams()
 	if err != nil {
-		return err
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
 	}
-
-	if !InStrSlice(http.MethodPost, disableApi) {
-		BindGroup.POST("/"+struNameLow, func(context echo.Context) error {
-			//fmt.Println(context.FormParams()
-			data, err := context.FormParams()
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMap(RetCode.Failed))
-			}
-			newModel, err := gormDrive.Insert(data)
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMapUsingMessage(RetCode.Failed, err.Error()))
-			}
-			return context.JSON(http.StatusCreated, RetCode.ToMapUsingData(RetCode.Success, newModel))
-		})
+	newModel, err := mv.gormDrive.Insert(data)
+	if err != nil {
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
 	}
+	return context.JSON(mv.GenRetMapWithData(http.StatusAccepted, newModel))
+}
 
-	if !InStrSlice(http.MethodGet, disableApi) {
-		BindGroup.GET("/"+struNameLow, func(context echo.Context) error {
-			query := context.QueryParams()
-			result, resDB, err := gormDrive.Select(query)
-			var count int
-			resDB.Count(&count)
-			respData := map[string]interface{}{"items": result, "items_count": reflect.ValueOf(result).Elem().Len(), "row_count": count}
-
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMapUsingMessage(RetCode.Failed, err.Error()))
-			}
-
-			return context.JSON(http.StatusOK, RetCode.ToMapUsingData(RetCode.Success, respData))
-		})
+func (mv *ModelView) FuncDELETE(context echo.Context) error {
+	query := context.QueryParams()
+	rowsAffected, err := mv.gormDrive.Delete(query, context.QueryString())
+	if err != nil {
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
 	}
+	return context.JSON(mv.GenRetMapWithData(http.StatusAccepted, rowsAffected))
+}
 
-	if !InStrSlice(http.MethodPut, disableApi) {
-		BindGroup.PUT("/"+struNameLow, func(context echo.Context) error {
-			query := context.QueryParams()
-			data, err := context.FormParams()
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMap(RetCode.Failed))
-			}
-			rowsAffected, err := gormDrive.Update(query, data)
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMapUsingMessage(RetCode.Failed, err.Error()))
-			}
-			return context.JSON(http.StatusCreated, RetCode.ToMapUsingData(RetCode.Success, map[string]interface{}{"rows_affected": rowsAffected}))
-		})
+func (mv *ModelView) FuncPUT(context echo.Context) error {
+	query := context.QueryParams()
+	data, err := context.FormParams()
+	if err != nil {
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
 	}
+	rowsAffected, err := mv.gormDrive.Update(query, data, context.QueryString())
+	if err != nil {
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
+	}
+	return context.JSON(mv.GenRetMapWithData(http.StatusCreated, rowsAffected))
+}
 
-	if !InStrSlice(http.MethodDelete, disableApi) {
-		BindGroup.DELETE("/"+struNameLow, func(context echo.Context) error {
-			query := context.QueryParams()
-			rowsAffected, err := gormDrive.Delete(query)
-			if err != nil {
-				return context.JSON(http.StatusBadRequest, RetCode.ToMapUsingMessage(RetCode.Failed, err.Error()))
-			}
-			return context.JSON(http.StatusAccepted, RetCode.ToMapUsingData(RetCode.Success, map[string]interface{}{"rows_affected": rowsAffected}))
-		})
+func (mv *ModelView) FuncGET(context echo.Context) error {
+	query := context.QueryParams()
+	result, resDB, err := mv.gormDrive.Select(query, context.QueryString())
+	var count int
+	resDB.Count(&count)
+	respData := map[string]interface{}{"items": result, "items_count": reflect.ValueOf(result).Elem().Len(), "row_count": count}
+
+	if err != nil {
+		return context.JSON(mv.GenRetMapWithMsg(http.StatusBadRequest, err.Error()))
 	}
-	return nil
+	return context.JSON(mv.GenRetMapWithData(http.StatusOK, respData))
+}
+
+func (mv *ModelView) GenRetMapWithData(statusCode int, data interface{}) (int, map[string]interface{}) {
+	retVal := mv.GenResponeMap(statusCode)
+	retVal["data"] = data
+	return statusCode, retVal
+}
+
+func (mv *ModelView) GenRetMapWithMsg(statusCode int, message interface{}) (int, map[string]interface{}) {
+	retVal := mv.GenResponeMap(statusCode)
+	if _, ok := retVal["message"]; ok {
+		retVal["message"] = message
+	} else {
+		retVal["error"] = message
+	}
+	return statusCode, retVal
+}
+
+func (mv *ModelView) GenRetMapWithMsgData(statusCode int, message interface{}, data interface{}) (int, map[string]interface{}) {
+	_, retVal := mv.GenRetMapWithMsg(statusCode, message)
+	retVal["data"] = data
+	return statusCode, retVal
+}
+
+func (mv *ModelView) GenResponeMap(statusCode int) (map[string]interface{}) {
+	respData := map[string]interface{}{}
+	var message interface{}
+	if v, ok := mv.Message[statusCode]; ok {
+		message = v
+	} else {
+		message = "Unknow status"
+	}
+	if statusCode < 400 {
+		respData["message"] = message
+	} else {
+		respData["error"] = message
+	}
+	return respData
+}
+
+func (mv *ModelView) EnableDefault() {
+	mv.EnablePOST()
+	mv.EnableDELETE()
+	mv.EnablePUT()
+	mv.EnableGET()
 }

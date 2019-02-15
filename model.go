@@ -6,7 +6,6 @@ import (
 	"github.com/jinzhu/gorm"
 	"net/url"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -57,7 +56,7 @@ func ParseOperator(lOperator []string) (sLogical, sComparison string) {
 		if sLogical != "" && sComparison != "" {
 			break
 		}
-		sOperator := strings.ToUpper(lOperator[i][1:])
+		sOperator := strings.ToUpper(lOperator[i])
 		if v, ok := LogicalOperator[sOperator]; sLogical == "" && ok {
 			sLogical = v
 		} else if v, ok := ComparisonOperator[sOperator]; sComparison == "" && ok {
@@ -132,7 +131,6 @@ func (gormDri *GORMDrive) Insert(data url.Values) (interface{}, error) {
 		// todo: 没有考虑到内嵌结构体部分，这里写的捞一些
 		if modelElm.Field(i).Kind() == reflect.Struct {
 			embedStruField := modelElm.Field(i)
-			//fmt.Println(1100, embedStruField)
 			embedStruType := embedStruField.Type()
 			for j := 0; j < embedStruField.NumField(); j++ {
 				key := strings.ToLower(embedStruType.Field(j).Name)
@@ -155,11 +153,12 @@ func (gormDri *GORMDrive) Insert(data url.Values) (interface{}, error) {
 }
 
 // 查询数据接口
-func (gormDri *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error) {
+func (gormDri *GORMDrive) Select(query url.Values, queryString string) (interface{}, *gorm.DB, error) {
 	refValueModels := gormDri.GenModels()
 
 	lModelsPtr := refValueModels.Interface()
-	resDB, err := gormDri.QueryParse(DB, query)
+	resDB, err := gormDri.QueryParse(DB, query, queryString)
+
 	if err != nil {
 		return nil, resDB, err
 	}
@@ -193,13 +192,13 @@ func (gormDri *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error
 }
 
 // 更新数据接口
-func (gormDri *GORMDrive) Update(query, data url.Values) (int64, error) {
+func (gormDri *GORMDrive) Update(query, data url.Values, queryString string) (int64, error) {
 	result, err := gormDri.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
 	if err != nil {
 		return 0, err
 	}
 
-	resDB, err := gormDri.QueryParse(DB.Model(gormDri.Model), query)
+	resDB, err := gormDri.QueryParse(DB.Model(gormDri.Model), query, queryString)
 	if err != nil {
 		return 0, err
 	}
@@ -208,8 +207,8 @@ func (gormDri *GORMDrive) Update(query, data url.Values) (int64, error) {
 }
 
 // 删除数据接口
-func (gormDri *GORMDrive) Delete(query url.Values) (int64, error) {
-	resDB, err := gormDri.QueryParse(DB, query)
+func (gormDri *GORMDrive) Delete(query url.Values, queryString string) (int64, error) {
+	resDB, err := gormDri.QueryParse(DB, query, queryString)
 	if err != nil {
 		return 0, err
 	}
@@ -223,41 +222,38 @@ func (gormDri *GORMDrive) Delete(query url.Values) (int64, error) {
 	return resDB.RowsAffected, resDB.Error
 }
 
-// todo: url.values 中存在乱序问题
-func (gormDri *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values) (resDB *gorm.DB, err error) {
+func (gormDri *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values, queryString string) (resDB *gorm.DB, err error) {
 	sWhereStatement := ""
 	lWhereArgs := make([]interface{}, 0)
 
 	isFirstCondition := true
 	mv := reflect.TypeOf(gormDri.Model).Elem()
 
-	for k, v := range query {
-		regFieldName := regexp.MustCompile(`^\w+`)
-		sFieldName := strings.ToLower(regFieldName.FindString(k))
+	querySlice := strings.Split(queryString, "&")
+	for i := range querySlice {
+		qk := strings.Split(querySlice[i], "=")[0]
+		//regFieldName := regexp.MustCompile(`^\w+`)
+		qkSlice := strings.Split(qk, ".")
+		//sFieldName := strings.ToLower(qkSlice[0])
 
 		if _, isExist := mv.FieldByNameFunc(func(s string) bool {
-			return strings.ToLower(s) == sFieldName
+			return strings.ToLower(s) == qkSlice[0]
 		}); !isExist {
 			continue
 		}
 
-		regOperator := regexp.MustCompile(`\.(\w+)`)
-		sLogicalOperator, sComparisonOperator := ParseOperator(regOperator.FindAllString(k, -1))
+		//regOperator := regexp.MustCompile(`\.(\w+)`)
+		sLogicalOperator, sComparisonOperator := ParseOperator(qkSlice)
 		if isFirstCondition {
 			sLogicalOperator = ""
 		} else {
 			sLogicalOperator += " "
 		}
 
-		if sComparisonOperator == "" {
-			sComparisonOperator = ComparisonOperator["EQ"]
-		}
-
-		sWhereStatement += fmt.Sprintf("%s%s%s? ", sLogicalOperator, sFieldName, sComparisonOperator)
-		lWhereArgs = append(lWhereArgs, v)
+		sWhereStatement += fmt.Sprintf("%s%s%s? ", sLogicalOperator, qkSlice[0], sComparisonOperator)
+		lWhereArgs = append(lWhereArgs, query[qk][0])
 		isFirstCondition = false
 	}
-
 	resDB = DB.Model(gormDri.Model).Where(sWhereStatement, lWhereArgs...)
 	return resDB, resDB.Error
 }

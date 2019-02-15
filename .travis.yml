@@ -3,11 +3,18 @@ go:
   - '1.9'
   - 1.10.x
 
+install:
+  - go get github.com/mattn/goveralls
 script:
-  - go test -bench=.
+  - go test -v -covermode=count -coverprofile=coverage.cov
+  - $HOME/gopath/bin/goveralls -coverprofile=coverage.out -service=travis-ci -repotoken $COVERALLS_TOKEN
 notifications:
   email:
     recipients:
       - 437664071@qq.com
     on_success: change
     on_failure: always
+
+env:
+  global:
+    secure: "spga2n92/Gy5fBj4wSKPlDy+xaBEL5x9rSRwwFb0c6+LJ9KbzV3/3niyzXhzmgsCTwizIXvYuLcCIBPFi2ZGK3t8oCxGTXfUMHZXM//5lyldIvBWwDXFRAedyHbtgcCG/ZXiNuTY3gwqG63dp+hEUbhpQ5mGZmdk5mv8zCEdUceMoPEw3JDbi8j+rK+ef6OTZJ9wjiIPDVbEx6lC6AUAQaX2MwyNC7jg818+aTM6z+n5NTCFXvOwRs4XiLDp0qBACxTMHOl3rqMRBPE12Jmr90A54bncl6+bjD2yFie0n6NxRauAXDlG4h/BeAFOuYU2OmM/K7be+bdR5Jbxw5ql8EGpbP98RK9UtyVCmaHOcpHkwR7cgVxjWBKEv+WWkFlZrCvpW5/ztqjr2sLkjRrVN5V+2lUEo7JU0lz1GzyFm2slWkeBJUqpGg1cnaDjygnjji0kfPTJ24lVwkYNIQ4pDBd9JFEmn/yeBiSzh3ajF5tK88UqHpte9TGtNuy06iyquzzWyGn7SqsOyDqRyskkGNnd5v3E3UvZb5cfoisbILEFgNdtxykqOX1qhobyh9mMH6fUuqsa9hqnUo5i0PZkktKILDNTAjPASPgxv+PGXAJal3j2hZEr45L00kL8By8+cIq3JoQKNKgG9Cx8zadDrBml3W3Va072X9O3MntpYU0="
