@@ -8,6 +8,7 @@ before_install:
   - go get github.com/pelletier/go-toml
   - go get github.com/jinzhu/gorm/dialects/sqlite
 install:
+  - go get golang.org/x/tools/cmd/cover
   - go get github.com/mattn/goveralls
 script:
   - go test -v -covermode=count -coverprofile=coverage.out
