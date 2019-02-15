@@ -102,23 +102,23 @@ func NewGORMDrive(model interface{}, modelSlice interface{}) (*GORMDrive, error)
 	return newDrive, nil
 }
 
-func (self *GORMDrive) GenModel() (model reflect.Value) {
-	sv := reflect.ValueOf(self.Model)
+func (gormDri *GORMDrive) GenModel() (model reflect.Value) {
+	sv := reflect.ValueOf(gormDri.Model)
 	model = reflect.New(sv.Elem().Type())
 	model.Elem().Set(sv.Elem())
 	return model
 }
 
-func (self *GORMDrive) GenModels() (models reflect.Value) {
-	models = reflect.New(reflect.TypeOf(self.ModelSlice))
+func (gormDri *GORMDrive) GenModels() (models reflect.Value) {
+	models = reflect.New(reflect.TypeOf(gormDri.ModelSlice))
 	return models
 }
 
 // 新建数据接口
-func (self *GORMDrive) Insert(data url.Values) (interface{}, error) {
-	refValModel := self.GenModel()
+func (gormDri *GORMDrive) Insert(data url.Values) (interface{}, error) {
+	refValModel := gormDri.GenModel()
 
-	result, err := self.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
+	result, err := gormDri.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
 	if err != nil {
 		return nil, err
 	}
@@ -155,18 +155,18 @@ func (self *GORMDrive) Insert(data url.Values) (interface{}, error) {
 }
 
 // 查询数据接口
-func (self *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error) {
-	refValueModels := self.GenModels()
+func (gormDri *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error) {
+	refValueModels := gormDri.GenModels()
 
 	lModelsPtr := refValueModels.Interface()
-	resDB, err := self.QueryParse(DB, query)
+	resDB, err := gormDri.QueryParse(DB, query)
 	if err != nil {
 		return nil, resDB, err
 	}
 	var count uint
 	resDB.Count(&count)
 
-	result, err := self.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
+	result, err := gormDri.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
 	limit := 20
 	offset := 0
 	order := ""
@@ -193,13 +193,13 @@ func (self *GORMDrive) Select(query url.Values) (interface{}, *gorm.DB, error) {
 }
 
 // 更新数据接口
-func (self *GORMDrive) Update(query, data url.Values) (int64, error) {
-	result, err := self.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
+func (gormDri *GORMDrive) Update(query, data url.Values) (int64, error) {
+	result, err := gormDri.DataHanlder(data, []DataHandlerFunc{ExistsField, StringConvert}...)
 	if err != nil {
 		return 0, err
 	}
 
-	resDB, err := self.QueryParse(DB.Model(self.Model), query)
+	resDB, err := gormDri.QueryParse(DB.Model(gormDri.Model), query)
 	if err != nil {
 		return 0, err
 	}
@@ -208,27 +208,28 @@ func (self *GORMDrive) Update(query, data url.Values) (int64, error) {
 }
 
 // 删除数据接口
-func (self *GORMDrive) Delete(query url.Values) (int64, error) {
-	resDB, err := self.QueryParse(DB, query)
+func (gormDri *GORMDrive) Delete(query url.Values) (int64, error) {
+	resDB, err := gormDri.QueryParse(DB, query)
 	if err != nil {
 		return 0, err
 	}
-	result, err := self.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
+	result, err := gormDri.DataHanlder(query, []DataHandlerFunc{KeyToUpper}...)
 	if v, ok := result["EXT_UNSCOPED"]; ok {
 		if !IsFalseValue(v.([]string)[0]) {
 			resDB = resDB.Unscoped()
 		}
 	}
-	resDB = resDB.Delete(self.Model)
+	resDB = resDB.Delete(gormDri.Model)
 	return resDB.RowsAffected, resDB.Error
 }
 
-func (self *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values) (resDB *gorm.DB, err error) {
+// todo: url.values 中存在乱序问题
+func (gormDri *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values) (resDB *gorm.DB, err error) {
 	sWhereStatement := ""
 	lWhereArgs := make([]interface{}, 0)
 
 	isFirstCondition := true
-	mv := reflect.TypeOf(self.Model).Elem()
+	mv := reflect.TypeOf(gormDri.Model).Elem()
 
 	for k, v := range query {
 		regFieldName := regexp.MustCompile(`^\w+`)
@@ -257,15 +258,15 @@ func (self *GORMDrive) QueryParse(baseDB *gorm.DB, query url.Values) (resDB *gor
 		isFirstCondition = false
 	}
 
-	resDB = DB.Model(self.Model).Where(sWhereStatement, lWhereArgs...)
+	resDB = DB.Model(gormDri.Model).Where(sWhereStatement, lWhereArgs...)
 	return resDB, resDB.Error
 }
 
-func (self *GORMDrive) DataHanlder(data url.Values, handlers ...DataHandlerFunc) (map[string]interface{}, error) {
+func (gormDri *GORMDrive) DataHanlder(data url.Values, handlers ...DataHandlerFunc) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
-	mt := reflect.TypeOf(self.Model).Elem()
-	mv := reflect.ValueOf(self.Model).Elem()
+	mt := reflect.TypeOf(gormDri.Model).Elem()
+	mv := reflect.ValueOf(gormDri.Model).Elem()
 	for k, v := range data {
 		for _, handler := range handlers {
 			newKey, newValue, err := handler(k, v, mv, mt)

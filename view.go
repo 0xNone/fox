@@ -32,6 +32,17 @@ var (
 		-219: "非法参数",
 		-218: "非法提交内容",
 		1:    "Websocket 请求完成",}
+
+	ResponseCNData = map[int]interface{}{
+		http.StatusOK:           "成功",
+		http.StatusCreated:      "创建/更新成功",
+		http.StatusAccepted:     "操作成功",
+		http.StatusNoContent:    "",
+		http.StatusBadRequest:   "无效的请求",
+		http.StatusUnauthorized: "未授权访问",
+		http.StatusForbidden:    "拒绝访问",
+		http.StatusConflict:     "存在冲突",
+	}
 )
 
 func init() {
@@ -64,19 +75,19 @@ type ResponseCode struct {
 	Message map[int]string
 }
 
-func (self *ResponseCode) ToMap(code int) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": self.Message[code]}
+func (retCode *ResponseCode) ToMap(code int) map[string]interface{} {
+	return map[string]interface{}{"code": code, "message": retCode.Message[code]}
 }
 
-func (self *ResponseCode) ToMapUsingData(code int, data interface{}) map[string]interface{} {
-	return map[string]interface{}{"code": code, "message": self.Message[code], "data": data}
+func (retCode *ResponseCode) ToMapUsingData(code int, data interface{}) map[string]interface{} {
+	return map[string]interface{}{"code": code, "message": retCode.Message[code], "data": data}
 }
 
-func (self *ResponseCode) ToMapUsingMessage(code int, message string) map[string]interface{} {
+func (retCode *ResponseCode) ToMapUsingMessage(code int, message string) map[string]interface{} {
 	return map[string]interface{}{"code": code, "message": message}
 }
 
-func (self *ResponseCode) ToMapUsingDataMessage(code int, message string, data interface{}) map[string]interface{} {
+func (retCode *ResponseCode) ToMapUsingDataMessage(code int, message string, data interface{}) map[string]interface{} {
 	return map[string]interface{}{"code": code, "message": message, "data": data}
 }
 
@@ -120,7 +131,7 @@ func ModelRoute(model interface{}, modelSlice interface{}, disableApi ...string)
 
 	if !InStrSlice(http.MethodPost, disableApi) {
 		BindGroup.POST("/"+struNameLow, func(context echo.Context) error {
-			//fmt.Println(context.FormParams())
+			//fmt.Println(context.FormParams()
 			data, err := context.FormParams()
 			if err != nil {
 				return context.JSON(http.StatusBadRequest, RetCode.ToMap(RetCode.Failed))
