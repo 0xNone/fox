@@ -6,8 +6,8 @@ go:
 install:
   - go get github.com/mattn/goveralls
 script:
-  - go test -v -covermode=count -coverprofile=coverage.cov
-  - $HOME/gopath/bin/goveralls -coverprofile=coverage.cov -service=travis-ci -repotoken $COVERALLS_TOKEN
+  - go test -v -covermode=count -coverprofile=coverage.out
+  - $HOME/gopath/bin/goveralls -repotoken $COVERALLS_TOKEN -coverprofile=coverage.out -service=travis-ci
 notifications:
   email:
     recipients:
